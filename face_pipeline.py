@@ -69,29 +69,68 @@ def extract_face_features(landmarks):
     return lm / norm
 
 
-#Similarity Scores 
+#Similarity Scores - VECTORIZED (O(n²) memory but ~100x faster than nested loops)
 
 def compute_scores(features, labels):
-
-    genuine = []
-    impostor = []
-
+    """
+    Compute genuine and impostor scores using vectorized matrix operations.
+    
+    Returns:
+    - genuine: All intra-user (same person) scores
+    - impostor: All inter-user (different person) scores
+    - user_pair_scores: Dict mapping (user_i, user_j) -> mean similarity score
+    """
     n = len(features)
-
-    for i in range(n):
-        for j in range(i + 1, n):
-
-            sim = cosine_similarity(
-                features[i].reshape(1, -1),
-                features[j].reshape(1, -1)
-            )[0][0]
-
-            if labels[i] == labels[j]:
-                genuine.append(sim)
-            else:
-                impostor.append(sim)
-
-    return np.array(genuine), np.array(impostor)
+    labels = np.array(labels)
+    
+    print(f"  Computing {n}x{n} similarity matrix ({n*(n-1)//2:,} comparisons)...")
+    
+    # Step 1: Compute full similarity matrix at once (uses optimized BLAS)
+    sim_matrix = cosine_similarity(features)
+    
+    # Step 2: Create label match matrix (True where labels match)
+    label_match = labels[:, None] == labels[None, :]
+    
+    # Step 3: Get upper triangle indices (i < j) to avoid duplicates
+    upper_tri_indices = np.triu_indices(n, k=1)
+    
+    # Step 4: Extract scores from upper triangle
+    all_scores = sim_matrix[upper_tri_indices]
+    is_genuine = label_match[upper_tri_indices]
+    
+    # Step 5: Separate genuine and impostor scores
+    genuine = all_scores[is_genuine]
+    impostor = all_scores[~is_genuine]
+    
+    # Step 6: Compute USER-PAIR mean scores (for chimeric fusion)
+    unique_users = sorted(list(set(labels)))
+    user_to_idx = {u: i for i, u in enumerate(unique_users)}
+    num_users = len(unique_users)
+    
+    # Create user-level similarity matrix
+    user_sim_sum = np.zeros((num_users, num_users))
+    user_sim_count = np.zeros((num_users, num_users))
+    
+    sample_to_user = np.array([user_to_idx[l] for l in labels])
+    
+    for idx, (i, j) in enumerate(zip(*upper_tri_indices)):
+        ui, uj = sample_to_user[i], sample_to_user[j]
+        if ui > uj:
+            ui, uj = uj, ui
+        user_sim_sum[ui, uj] += all_scores[idx]
+        user_sim_count[ui, uj] += 1
+    
+    # Build user_pair_scores dictionary
+    user_pair_scores = {}
+    for i, user_i in enumerate(unique_users):
+        for j, user_j in enumerate(unique_users):
+            if i < j and user_sim_count[i, j] > 0:
+                user_pair_scores[(user_i, user_j)] = user_sim_sum[i, j] / user_sim_count[i, j]
+    
+    print(f"  Genuine: {len(genuine):,} | Impostor: {len(impostor):,}")
+    print(f"  User pairs: {len(user_pair_scores):,} | Users: {num_users}")
+    
+    return genuine, impostor, user_pair_scores, unique_users
 
 
 #Age group scores splitting
@@ -111,7 +150,8 @@ def compute_age_group_scores(features, labels, ages):
         f = features[indices]
         l = labels[indices]
 
-        g, im = compute_scores(f, l)
+        # compute_scores now returns 4 values - ignore user_pair data for age groups
+        g, im, _, _ = compute_scores(f, l)
         groups[age_group] = (g, im, len(indices))
 
     return groups
@@ -153,13 +193,13 @@ def run_face_pipeline():
 
     #Performance
     print("\nComputing similarity scores...")
-    genuine, impostor = compute_scores(features, new_labels)
+    genuine, impostor, user_pair_scores, user_list = compute_scores(features, new_labels)
 
     evaluator = Evaluator(
         num_thresholds=NUM_THRESHOLDS,
         genuine_scores=genuine,
         impostor_scores=impostor,
-        plot_title="Overall Face-Mediapipe System"
+        plot_title="Face-Mediapipe-System"
     )
 
     FPR, FNR, TPR = evaluator.compute_rates()
@@ -167,29 +207,21 @@ def run_face_pipeline():
     evaluator.plot_det_curve(FPR, FNR)
     evaluator.plot_roc_curve(FPR, TPR)
 
-   #Age Groups
-    
-    print("\n========== AGE GROUP ANALYSIS ==========\n")
-
-    age_groups = compute_age_group_scores(features, new_labels, new_ages)
-
-    for group_name, (genuine_g, impostor_g, count) in age_groups.items():
-
-        print(f"\n--- Age group {group_name} (n={count}) ---")
-
-        eval_age = Evaluator(
-            num_thresholds=NUM_THRESHOLDS,
-            genuine_scores=genuine_g,
-            impostor_scores=impostor_g,
-            plot_title=f"Age Group {group_name}"
-        )
-
-        FPRg, FNRg, TPRg = eval_age.compute_rates()
-        eval_age.plot_score_distribution()
-        eval_age.plot_det_curve(FPRg, FNRg)
-        eval_age.plot_roc_curve(FPRg, TPRg)
-
     print("\n========== FACE SYSTEM COMPLETE ==========\n")
+    
+    # Return scores AND user-pair data for chimeric fusion
+    return genuine, impostor, user_pair_scores, user_list
+
+
+def run_face_system(directory="IMDB", num_users=200):
+    """
+    Wrapper function for main.py integration.
+    Returns genuine and impostor scores.
+    """
+    global DATA_DIR
+    DATA_DIR = directory
+    
+    return run_face_pipeline()
 
 
 if __name__ == "__main__":

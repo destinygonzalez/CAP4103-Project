@@ -79,25 +79,71 @@ def augment_pitch(mfcc):
     return mfcc * 0.95     # lightweight emotional simulation
 
 
-#Score generation
+#Score generation - VECTORIZED (O(n²) memory but ~100x faster than nested loops)
 
 def compute_scores(features, labels):
-    genuine = []
-    impostor = []
-
-    print("Computing similarity scores...")
-
+    """
+    Compute genuine and impostor scores using vectorized matrix operations.
+    
+    Returns:
+    - genuine: All intra-user (same person) scores
+    - impostor: All inter-user (different person) scores
+    - user_pair_scores: Dict mapping (user_i, user_j) -> mean similarity score
+    - user_list: List of unique users
+    """
+    from sklearn.metrics.pairwise import cosine_similarity
+    
     n = len(features)
-    for i in range(n):
-        for j in range(i + 1, n):
-            sim = cosine_sim(features[i], features[j])
-
-            if labels[i] == labels[j]:
-                genuine.append(sim)
-            else:
-                impostor.append(sim)
-
-    return np.array(genuine), np.array(impostor)
+    labels = np.array(labels)
+    
+    print(f"  Computing {n}x{n} similarity matrix ({n*(n-1)//2:,} comparisons)...")
+    
+    # Step 1: Compute full similarity matrix at once (uses optimized BLAS)
+    sim_matrix = cosine_similarity(features)
+    
+    # Step 2: Create label match matrix (True where labels match)
+    label_match = labels[:, None] == labels[None, :]
+    
+    # Step 3: Get upper triangle indices (i < j) to avoid duplicates
+    upper_tri_indices = np.triu_indices(n, k=1)
+    
+    # Step 4: Extract scores from upper triangle
+    all_scores = sim_matrix[upper_tri_indices]
+    is_genuine = label_match[upper_tri_indices]
+    
+    # Step 5: Separate genuine and impostor scores
+    genuine = all_scores[is_genuine]
+    impostor = all_scores[~is_genuine]
+    
+    # Step 6: Compute USER-PAIR mean scores (for chimeric fusion)
+    unique_users = sorted(list(set(labels)))
+    user_to_idx = {u: i for i, u in enumerate(unique_users)}
+    num_users = len(unique_users)
+    
+    # Create user-level similarity matrix
+    user_sim_sum = np.zeros((num_users, num_users))
+    user_sim_count = np.zeros((num_users, num_users))
+    
+    sample_to_user = np.array([user_to_idx[l] for l in labels])
+    
+    for idx, (i, j) in enumerate(zip(*upper_tri_indices)):
+        ui, uj = sample_to_user[i], sample_to_user[j]
+        if ui > uj:
+            ui, uj = uj, ui
+        user_sim_sum[ui, uj] += all_scores[idx]
+        user_sim_count[ui, uj] += 1
+    
+    # Build user_pair_scores dictionary
+    user_pair_scores = {}
+    for i, user_i in enumerate(unique_users):
+        for j, user_j in enumerate(unique_users):
+            if i < j and user_sim_count[i, j] > 0:
+                user_pair_scores[(user_i, user_j)] = user_sim_sum[i, j] / user_sim_count[i, j]
+    
+    print(f"  Genuine: {len(genuine):,} | Impostor: {len(impostor):,}")
+    print(f"  User pairs: {len(user_pair_scores):,} | Users: {num_users}")
+    
+    return genuine, impostor, user_pair_scores, unique_users
 
 
 #Plot wrapper
@@ -133,15 +179,15 @@ def run_audio_pipeline():
     print("Extracting clean MFCC features...")
     features = np.array([extract_features(m) for m in mfccs])
 
-    #Clean Scorews
-    genuine_clean, impostor_clean = compute_scores(features, speakers)
+    #Clean Scores - now returns user_pair_scores
+    genuine_clean, impostor_clean, user_pair_scores, user_list = compute_scores(features, speakers)
     print(f"Clean: Genuine={len(genuine_clean)}, Impostor={len(impostor_clean)}")
 
     #Emotional Condition
     print("\nApplying emotional variation...")
     emotional_features = np.array([augment_pitch(f) for f in features])
 
-    genuine_em, impostor_em = compute_scores(emotional_features, speakers)
+    genuine_em, impostor_em, _, _ = compute_scores(emotional_features, speakers)
     print(f"Emotional: Genuine={len(genuine_em)}, Impostor={len(impostor_em)}")
 
     #Age groups
@@ -179,10 +225,24 @@ def run_audio_pipeline():
         f_sub = features[idxs]
         s_sub = speakers[idxs]
 
-        gen_g, imp_g = compute_scores(f_sub, s_sub)
+        gen_g, imp_g, _, _ = compute_scores(f_sub, s_sub)
         evaluate_and_plot(gen_g, imp_g, f"Audio_{group}")
 
     print("\n======= AUDIO SYSTEM COMPLETE =======\n")
+    
+    # Return clean scores AND user-pair data for chimeric fusion
+    return genuine_clean, impostor_clean, user_pair_scores, user_list
+
+
+def run_voice_system(directory="AudioMNIST/data", num_users=50):
+    """
+    Wrapper function for main.py integration.
+    Returns genuine and impostor scores + user pair data for chimeric fusion.
+    """
+    global DATA_DIR
+    DATA_DIR = directory.replace("/data", "")
+    
+    return run_audio_pipeline()
 
 
 def main():

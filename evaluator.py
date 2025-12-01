@@ -26,7 +26,7 @@ class Evaluator:
         - epsilon (float): A small value to prevent division by zero.
         """
         self.num_thresholds = num_thresholds
-        self.thresholds = np.linspace(-0.1, 1.1, num_thresholds)
+        self.thresholds = np.linspace(-1.1, 1.1, num_thresholds)
         self.genuine_scores = genuine_scores
         self.impostor_scores = impostor_scores
         self.plot_title = plot_title
@@ -128,13 +128,10 @@ class Evaluator:
                   fontsize=15,
                   weight='bold')
         
-        # Save the figure before displaying it
+        # Save the figure
         plt.savefig('score_distribution_plot_(%s).png' % self.plot_title, dpi=300, bbox_inches="tight")
         
-        # Display the plot after saving
-        plt.show()
-        
-        # Close the figure to free up resources
+        # Close the figure to free up resources (no plt.show() to avoid blocking)
         plt.close()
 
         return
@@ -254,14 +251,12 @@ class Evaluator:
             fontsize=10
         )
         
-        # Step 13: Save the plot as an image file
+        # Save the plot as an image file
         plt.savefig(
             'DET_curve_(%s).png' % self.plot_title, dpi=300, bbox_inches="tight"
         )
         
-        # Step 14: Display the plot
-        plt.show()
-        # Step 15: Close the plot to free up resources
+        # Close the plot to free up resources (no plt.show() to avoid blocking)
         plt.close()
     
         return
@@ -295,10 +290,10 @@ class Evaluator:
         # Set font sizes for ticks, x and y labels
         plt.xticks(fontsize=12)
         plt.yticks(fontsize=12)
-        # Save the plot as a PNG file and display it
+        # Save the plot as a PNG file
         plt.savefig('ROC_curve(%s).png' % self.plot_title, dpi=300, bbox_inches='tight')
-        plt.show()
-        # Close the figure to free up resources
+        
+        # Close the figure to free up resources (no plt.show() to avoid blocking)
         plt.close()
  
         return
@@ -323,56 +318,10 @@ class Evaluator:
         # Return the lists of FPR, FNR, and TPR
         return np.array(FPR), np.array(FNR), np.array(TPR)
 
-def main():
-
-    # ---- FACE SYSTEM ----
-    from face_pipeline import run_face_system
-    face_genuine, face_impostor = run_face_system()
-
-    evaluator_face = Evaluator(
-        num_thresholds=500,
-        genuine_scores=face_genuine,
-        impostor_scores=face_impostor,
-        plot_title="FACE_SYSTEM"
-    )
-    FPR, FNR, TPR = evaluator_face.compute_rates()
-    evaluator_face.plot_score_distribution()
-    evaluator_face.plot_det_curve(FPR, FNR)
-    evaluator_face.plot_roc_curve(FPR, TPR)
-
-
-    # ---- VOICE SYSTEM ----
-    from audio_pipeline import run_voice_system
-    voice_genuine, voice_impostor = run_voice_system()
-
-    evaluator_voice = Evaluator(
-        num_thresholds=500,
-        genuine_scores=voice_genuine,
-        impostor_scores=voice_impostor,
-        plot_title="VOICE_SYSTEM"
-    )
-    FPR, FNR, TPR = evaluator_voice.compute_rates()
-    evaluator_voice.plot_score_distribution()
-    evaluator_voice.plot_det_curve(FPR, FNR)
-    evaluator_voice.plot_roc_curve(FPR, TPR)
-
-
-    # ---- SCORE-LEVEL FUSION ----
-    fused_genuine = (face_genuine + voice_genuine) / 2
-    fused_impostor = (face_impostor + voice_impostor) / 2
-
-    evaluator_fusion = Evaluator(
-        num_thresholds=500,
-        genuine_scores=fused_genuine,
-        impostor_scores=fused_impostor,
-        plot_title="FUSION"
-    )
-    FPR, FNR, TPR = evaluator_fusion.compute_rates()
-    evaluator_fusion.plot_score_distribution()
-    evaluator_fusion.plot_det_curve(FPR, FNR)
-    evaluator_fusion.plot_roc_curve(FPR, TPR)
-
+# NOTE: To run the full system, use main.py instead.
+# This file is only for the Evaluator class.
 
 if __name__ == "__main__":
-    main()
+    print("This module provides the Evaluator class.")
+    print("To run the full biometric system, use: python main.py")
 
