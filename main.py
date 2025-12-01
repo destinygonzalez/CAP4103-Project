@@ -36,10 +36,15 @@ def main():
     print("="*60)
     
     # Now returns: genuine, impostor, user_pair_scores, user_list
-    face_genuine, face_impostor, face_user_pairs, face_users = run_face_system(
+    print("DEBUG: About to call run_face_system...", flush=True)
+    result = run_face_system(
         directory="IMDB",
         num_users=200
     )
+    print(f"DEBUG: run_face_system returned {type(result)}, length={len(result) if hasattr(result, '__len__') else 'N/A'}", flush=True)
+    
+    face_genuine, face_impostor, face_user_pairs, face_users = result
+    print("DEBUG: Unpacked face results successfully", flush=True)
     
     print(f"\nFace system results:")
     print(f"  Genuine scores: {len(face_genuine):,}")
@@ -50,13 +55,18 @@ def main():
     # 2. RUN VOICE SYSTEM
     print("\n" + "="*60)
     print("RUNNING VOICE BIOMETRIC SYSTEM (AudioMNIST Dataset)")
-    print("="*60)
+    print("="*60, flush=True)
     
     # Now returns: genuine, impostor, user_pair_scores, user_list
-    voice_genuine, voice_impostor, voice_user_pairs, voice_users = run_voice_system(
+    print("DEBUG: About to call run_voice_system...", flush=True)
+    voice_result = run_voice_system(
         directory="AudioMNIST/data",
         num_users=50
     )
+    print(f"DEBUG: run_voice_system returned", flush=True)
+    
+    voice_genuine, voice_impostor, voice_user_pairs, voice_users = voice_result
+    print("DEBUG: Unpacked voice results successfully", flush=True)
     
     print(f"\nVoice system results:")
     print(f"  Genuine scores: {len(voice_genuine):,}")
@@ -67,9 +77,13 @@ def main():
     # 3. RUN FUSION (CHIMERIC USER MODEL)
     print("\n" + "="*60)
     print("RUNNING CHIMERIC USER FUSION")
-    print("="*60)
+    print("="*60, flush=True)
     
     # Pass user pair data for proper chimeric fusion
+    print("DEBUG: About to call score_level_fusion...", flush=True)
+    print(f"DEBUG: face_user_pairs type={type(face_user_pairs)}, len={len(face_user_pairs)}", flush=True)
+    print(f"DEBUG: voice_user_pairs type={type(voice_user_pairs)}, len={len(voice_user_pairs)}", flush=True)
+    
     fused_genuine, fused_impostor = score_level_fusion(
         face_genuine, face_impostor,
         voice_genuine, voice_impostor,
