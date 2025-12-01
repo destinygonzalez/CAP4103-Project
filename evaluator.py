@@ -129,7 +129,7 @@ class Evaluator:
                   weight='bold')
         
         # Save the figure
-        plt.savefig('score_distribution_plot_(%s).png' % self.plot_title, dpi=300, bbox_inches="tight")
+        plt.savefig('new_score_distribution_plot_(%s).png' % self.plot_title, dpi=300, bbox_inches="tight")
         
         # Close the figure to free up resources (no plt.show() to avoid blocking)
         plt.close()
@@ -253,7 +253,7 @@ class Evaluator:
         
         # Save the plot as an image file
         plt.savefig(
-            'DET_curve_(%s).png' % self.plot_title, dpi=300, bbox_inches="tight"
+            'new_DET_curve_(%s).png' % self.plot_title, dpi=300, bbox_inches="tight"
         )
         
         # Close the plot to free up resources (no plt.show() to avoid blocking)
@@ -291,7 +291,7 @@ class Evaluator:
         plt.xticks(fontsize=12)
         plt.yticks(fontsize=12)
         # Save the plot as a PNG file
-        plt.savefig('ROC_curve(%s).png' % self.plot_title, dpi=300, bbox_inches='tight')
+        plt.savefig('new_ROC_curve(%s).png' % self.plot_title, dpi=300, bbox_inches='tight')
         
         # Close the figure to free up resources (no plt.show() to avoid blocking)
         plt.close()
