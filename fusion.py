@@ -1,4 +1,5 @@
 # fusion.py
+#
 """
 Chimeric User Fusion Module
 
