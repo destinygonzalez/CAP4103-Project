@@ -79,6 +79,18 @@ def chimeric_fusion(face_user_pair_scores, face_users,
     # Chimeric_i vs Chimeric_j where i != j
     chimeric_impostor = []
     matched_pairs = 0
+    missing_face = 0
+    missing_voice = 0
+    
+    # Debug: Show sample keys from each dictionary
+    print(f"DEBUG: Face user_pair_scores has {len(face_user_pair_scores)} entries")
+    print(f"DEBUG: Voice user_pair_scores has {len(voice_user_pair_scores)} entries")
+    if len(face_user_pair_scores) > 0:
+        sample_face_keys = list(face_user_pair_scores.keys())[:3]
+        print(f"DEBUG: Sample face keys: {sample_face_keys}")
+    if len(voice_user_pair_scores) > 0:
+        sample_voice_keys = list(voice_user_pair_scores.keys())[:3]
+        print(f"DEBUG: Sample voice keys: {sample_voice_keys}")
     
     for i in range(num_chimeric):
         for j in range(i + 1, num_chimeric):
@@ -99,6 +111,18 @@ def chimeric_fusion(face_user_pair_scores, face_users,
             else:
                 voice_key = (voice_j, voice_i)
             
+            # Debug first few attempts
+            if i == 0 and j < 3:
+                print(f"DEBUG: Trying face_key={face_key}, voice_key={voice_key}")
+                print(f"  face_key in dict: {face_key in face_user_pair_scores}")
+                print(f"  voice_key in dict: {voice_key in voice_user_pair_scores}")
+            
+            # Track missing keys
+            if face_key not in face_user_pair_scores:
+                missing_face += 1
+            if voice_key not in voice_user_pair_scores:
+                missing_voice += 1
+            
             # Only include if both scores exist
             if face_key in face_user_pair_scores and voice_key in voice_user_pair_scores:
                 f_score = face_user_pair_scores[face_key]
@@ -115,6 +139,7 @@ def chimeric_fusion(face_user_pair_scores, face_users,
                 matched_pairs += 1
     
     print(f"Chimeric impostor pairs created: {matched_pairs}")
+    print(f"DEBUG: Missing face keys: {missing_face}, Missing voice keys: {missing_voice}")
     
     # For GENUINE scores, we use the per-sample genuine arrays
     # Since each modality's genuine scores are intra-user (same person),
