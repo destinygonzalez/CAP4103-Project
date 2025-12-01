@@ -128,11 +128,8 @@ class Evaluator:
                   fontsize=15,
                   weight='bold')
         
-        # Save the figure before displaying it
+        # Save the figure
         plt.savefig('score_distribution_plot_(%s).png' % self.plot_title, dpi=300, bbox_inches="tight")
-        
-        # Display the plot after saving
-        plt.show()
         
         # Close the figure to free up resources
         plt.close()
@@ -254,14 +251,12 @@ class Evaluator:
             fontsize=10
         )
         
-        # Step 13: Save the plot as an image file
+        # Save the plot as an image file
         plt.savefig(
             'DET_curve_(%s).png' % self.plot_title, dpi=300, bbox_inches="tight"
         )
         
-        # Step 14: Display the plot
-        plt.show()
-        # Step 15: Close the plot to free up resources
+        # Close the plot to free up resources
         plt.close()
     
         return
@@ -295,9 +290,8 @@ class Evaluator:
         # Set font sizes for ticks, x and y labels
         plt.xticks(fontsize=12)
         plt.yticks(fontsize=12)
-        # Save the plot as a PNG file and display it
+        # Save the plot as a PNG file
         plt.savefig('ROC_curve(%s).png' % self.plot_title, dpi=300, bbox_inches='tight')
-        plt.show()
         # Close the figure to free up resources
         plt.close()
  

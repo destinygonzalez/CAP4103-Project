@@ -1,3 +1,11 @@
+"""
+AUDIO PIPELINE FOR BIOMETRIC PROJECT
+Uses MFCC features + Evaluator to compute biometric performance
+
+FIXED VERSION: Uses Euclidean distance-based similarity and enhanced MFCC features
+for better speaker discrimination.
+"""
+
 import os
 import numpy as np
 import librosa
@@ -10,24 +18,64 @@ NUM_THRESHOLDS = 300
 MAX_FILES_PER_SPEAKER = 20     # Fast loading
 
 
-#Cosine similarity
+#FIXED: Use Euclidean distance converted to similarity
+def compute_similarity(a, b, eps=1e-12):
+    """
+    Compute similarity between two feature vectors using Euclidean distance.
+    Returns value in range (0, 1] where 1 = identical.
+    """
+    # Euclidean distance
+    dist = np.sqrt(np.sum((a - b)**2))
+    
+    # Convert to similarity: 1 / (1 + distance)
+    # This gives values in (0, 1] where smaller distance = higher similarity
+    similarity = 1.0 / (1.0 + dist)
+    
+    return float(similarity)
 
-def cosine_sim(a, b, eps=1e-12):
-    num = np.dot(a, b)
-    den = (np.linalg.norm(a) * np.linalg.norm(b)) + eps
-    return float(num / den)
 
-
-#MFCC Extraction
+#FIXED: Enhanced MFCC Extraction with delta features
 def fast_mfcc(path):
+    """
+    Extract enhanced MFCC features including:
+    - 13 MFCC coefficients
+    - 13 delta (first derivative) coefficients
+    - 13 delta-delta (second derivative) coefficients
+    Total: 39 features for better speaker discrimination
+    """
     sr, sig = wavfile.read(path)
 
-    # Convert int16 → float32
+    # Convert int16 -> float32
     if sig.dtype != np.float32:
         sig = sig.astype(np.float32) / 32768.0
 
+    # Extract 13 MFCCs
     mfcc = librosa.feature.mfcc(y=sig, sr=sr, n_mfcc=13)
-    return np.mean(mfcc, axis=1)
+    
+    # Compute delta (first derivative) features
+    mfcc_delta = librosa.feature.delta(mfcc)
+    
+    # Compute delta-delta (second derivative) features  
+    mfcc_delta2 = librosa.feature.delta(mfcc, order=2)
+    
+    # Concatenate and take mean over time
+    features = np.concatenate([
+        np.mean(mfcc, axis=1),
+        np.mean(mfcc_delta, axis=1),
+        np.mean(mfcc_delta2, axis=1)
+    ])
+    
+    # Also add standard deviation for more robust features
+    features_std = np.concatenate([
+        np.std(mfcc, axis=1),
+        np.std(mfcc_delta, axis=1),
+        np.std(mfcc_delta2, axis=1)
+    ])
+    
+    # Combine mean and std features
+    all_features = np.concatenate([features, features_std])
+    
+    return all_features
 
 
 #Load AudioMNIST quickly
@@ -70,17 +118,31 @@ def load_audio_mnist(root="AudioMNIST"):
 
 #Feature extraction
 def extract_features(mfcc_vec):
+    """
+    Optional additional feature processing.
+    Currently returns raw MFCC features.
+    """
     return mfcc_vec
 
 
-#Emotional variation (pitch)
-
+#Emotional variation (more realistic)
 def augment_pitch(mfcc):
-    return mfcc * 0.95     # lightweight emotional simulation
+    """
+    Simulate emotional variation by adding noise and scaling.
+    This creates a more realistic variation than simple multiplication.
+    """
+    # Add small random perturbation
+    noise = np.random.randn(*mfcc.shape) * 0.1
+    
+    # Scale certain frequency bands differently
+    scaled = mfcc.copy()
+    scaled[:13] *= 0.95  # Slightly reduce static MFCCs
+    scaled[13:26] *= 1.05  # Slightly increase delta MFCCs
+    
+    return scaled + noise
 
 
-#Score generation
-
+#FIXED: Score generation using new similarity function
 def compute_scores(features, labels):
     genuine = []
     impostor = []
@@ -90,7 +152,7 @@ def compute_scores(features, labels):
     n = len(features)
     for i in range(n):
         for j in range(i + 1, n):
-            sim = cosine_sim(features[i], features[j])
+            sim = compute_similarity(features[i], features[j])
 
             if labels[i] == labels[j]:
                 genuine.append(sim)
@@ -101,9 +163,10 @@ def compute_scores(features, labels):
 
 
 #Plot wrapper
-
 def evaluate_and_plot(genuine, impostor, title):
     print(f"\n=== Generating curves for: {title} ===")
+    print(f"Genuine: n={len(genuine)}, mean={np.mean(genuine):.4f}, std={np.std(genuine):.4f}")
+    print(f"Impostor: n={len(impostor)}, mean={np.mean(impostor):.4f}, std={np.std(impostor):.4f}")
 
     evaluator = Evaluator(
         num_thresholds=NUM_THRESHOLDS,
@@ -117,10 +180,11 @@ def evaluate_and_plot(genuine, impostor, title):
     evaluator.plot_score_distribution()
     evaluator.plot_det_curve(FPR, FNR)
     evaluator.plot_roc_curve(FPR, TPR)
+    
+    return genuine, impostor
 
 
 #Main pipeline
-
 def run_audio_pipeline():
 
     print("\n======= AUDIO SYSTEM STARTED =======\n")
@@ -128,12 +192,14 @@ def run_audio_pipeline():
     #Load
     mfccs, speakers, ages = load_audio_mnist(DATA_DIR)
     print(f"Loaded samples: {len(mfccs)}")
+    if len(mfccs) > 0:
+        print(f"Feature dimension: {len(mfccs[0])}")
 
     #Features
     print("Extracting clean MFCC features...")
     features = np.array([extract_features(m) for m in mfccs])
 
-    #Clean Scorews
+    #Clean Scores
     genuine_clean, impostor_clean = compute_scores(features, speakers)
     print(f"Clean: Genuine={len(genuine_clean)}, Impostor={len(impostor_clean)}")
 
@@ -161,7 +227,7 @@ def run_audio_pipeline():
         else:
             age_groups["Old_51_plus"].append(i)
 
-    #Output the 15 plots
+    #Output the plots
 
     # 1. baseline clean
     evaluate_and_plot(genuine_clean, impostor_clean, "Audio_Clean")
@@ -172,6 +238,7 @@ def run_audio_pipeline():
     # 3. age group plots
     for group, idxs in age_groups.items():
         if len(idxs) < 5:
+            print(f"Skipping {group}: only {len(idxs)} samples")
             continue
 
         print(f"\nEvaluating group: {group} ({len(idxs)} samples)")
@@ -183,6 +250,21 @@ def run_audio_pipeline():
         evaluate_and_plot(gen_g, imp_g, f"Audio_{group}")
 
     print("\n======= AUDIO SYSTEM COMPLETE =======\n")
+    
+    return genuine_clean, impostor_clean
+
+
+# Export function for main.py
+def run_voice_system(directory="AudioMNIST/data", num_users=50):
+    """
+    Simplified wrapper for main.py integration.
+    Returns genuine and impostor scores.
+    """
+    global DATA_DIR
+    DATA_DIR = directory.replace("/data", "")
+    
+    genuine, impostor = run_audio_pipeline()
+    return genuine, impostor
 
 
 def main():

@@ -2,12 +2,15 @@
 FACE PIPELINE FOR IMDB-WIKI BIOMETRIC PROJECT + AGE ANALYSIS
 Uses Mediapipe + Evaluator to compute biometric performance
 AND evaluates the system per age group.
+
+FIXED VERSION: Uses geometric features (inter-landmark distances) instead of 
+normalized raw coordinates for better discrimination.
 """
 
 import os
 import numpy as np
 import cv2
-from sklearn.metrics.pairwise import cosine_similarity
+from scipy.spatial.distance import euclidean, cdist
 
 from load_img_data import get_images
 from process_img_data import get_landmark_points
@@ -56,21 +59,94 @@ def sample(images, labels, ages, max_per_user=40):
     return out_imgs, out_labels, out_ages
 
 
-#Landmark embedding
-
+#FIXED: Extract geometric features from landmarks
 def extract_face_features(landmarks):
+    """
+    Extract geometric features from face landmarks.
+    Instead of raw coordinates, we compute:
+    1. Pairwise distances between key landmarks
+    2. This is scale-invariant when normalized by face size
+    
+    This approach creates more discriminative features than raw coordinates.
+    """
+    lm = np.array(landmarks)
+    
+    if len(lm) == 0:
+        return np.zeros(100)  # Return zero vector if no landmarks
+    
+    # Select key landmark indices for feature extraction
+    # For Mediapipe face mesh (468 landmarks), we use key facial points
+    # If fewer landmarks, use all of them
+    n_landmarks = len(lm)
+    
+    if n_landmarks >= 468:
+        # Key facial landmarks for Mediapipe face mesh
+        key_indices = [
+            # Eyes
+            33, 133, 362, 263,  # Eye corners
+            159, 145, 386, 374,  # Eye top/bottom
+            # Nose
+            1, 4, 5, 6, 168,  # Nose bridge and tip
+            # Mouth
+            61, 291, 0, 17,  # Mouth corners and top/bottom
+            # Face contour
+            10, 152, 234, 454,  # Forehead, chin, cheeks
+            # Eyebrows
+            70, 63, 105, 107,
+            336, 296, 334, 293,
+        ]
+        key_indices = [i for i in key_indices if i < n_landmarks]
+    else:
+        # Use all landmarks if fewer than 468
+        key_indices = list(range(min(n_landmarks, 50)))
+    
+    # Extract key landmarks
+    key_lm = lm[key_indices]
+    
+    # Compute pairwise distances between key landmarks
+    # This creates a geometric descriptor that captures face shape
+    n_key = len(key_lm)
+    distances = []
+    
+    for i in range(n_key):
+        for j in range(i + 1, n_key):
+            dist = np.sqrt((key_lm[i][0] - key_lm[j][0])**2 + 
+                          (key_lm[i][1] - key_lm[j][1])**2)
+            distances.append(dist)
+    
+    features = np.array(distances)
+    
+    # Normalize by face size (max distance) for scale invariance
+    if len(features) > 0 and np.max(features) > 0:
+        features = features / np.max(features)
+    
+    return features
 
-    lm = np.array(landmarks).flatten()
-    norm = np.linalg.norm(lm)
 
-    if norm == 0:
-        return lm
+#FIXED: Use Euclidean distance converted to similarity score
+def compute_similarity(feat1, feat2, eps=1e-12):
+    """
+    Compute similarity between two feature vectors.
+    Uses Euclidean distance converted to similarity score in [0, 1].
+    
+    Lower distance = higher similarity
+    """
+    # Ensure same length
+    min_len = min(len(feat1), len(feat2))
+    f1 = feat1[:min_len]
+    f2 = feat2[:min_len]
+    
+    # Euclidean distance
+    dist = np.sqrt(np.sum((f1 - f2)**2))
+    
+    # Convert to similarity: exp(-distance) gives values in (0, 1]
+    # Or use: 1 / (1 + distance) for range (0, 1]
+    similarity = 1.0 / (1.0 + dist)
+    
+    return similarity
 
-    return lm / norm
 
-
-#Similarity Scores 
-
+#FIXED: Compute scores using new similarity function
 def compute_scores(features, labels):
 
     genuine = []
@@ -80,11 +156,8 @@ def compute_scores(features, labels):
 
     for i in range(n):
         for j in range(i + 1, n):
-
-            sim = cosine_similarity(
-                features[i].reshape(1, -1),
-                features[j].reshape(1, -1)
-            )[0][0]
+            
+            sim = compute_similarity(features[i], features[j])
 
             if labels[i] == labels[j]:
                 genuine.append(sim)
@@ -108,8 +181,8 @@ def compute_age_group_scores(features, labels, ages):
             print(f"Skipping {age_group}: Not enough samples")
             continue
 
-        f = features[indices]
-        l = labels[indices]
+        f = [features[i] for i in indices]
+        l = [labels[i] for i in indices]
 
         g, im = compute_scores(f, l)
         groups[age_group] = (g, im, len(indices))
@@ -146,20 +219,31 @@ def run_face_pipeline():
     print("\nExtracting Mediapipe landmarks...")
     landmarks, new_labels = get_landmark_points(clean_imgs, clean_labels)
 
-    features = np.array([extract_face_features(lm) for lm in landmarks])
-    new_ages = np.array(clean_ages)
+    print(f"\nExtracting geometric features from landmarks...")
+    features = [extract_face_features(lm) for lm in landmarks]
+    
+    # Filter out any empty features
+    valid_indices = [i for i, f in enumerate(features) if len(f) > 0]
+    features = [features[i] for i in valid_indices]
+    new_labels = np.array([new_labels[i] for i in valid_indices])
+    new_ages = np.array([clean_ages[i] for i in valid_indices])
 
-    print(f"Landmarks extracted: {len(features)}")
+    print(f"Valid features extracted: {len(features)}")
+    if len(features) > 0:
+        print(f"Feature dimension: {len(features[0])}")
 
     #Performance
     print("\nComputing similarity scores...")
     genuine, impostor = compute_scores(features, new_labels)
+    
+    print(f"Genuine scores: {len(genuine)}, mean={np.mean(genuine):.4f}, std={np.std(genuine):.4f}")
+    print(f"Impostor scores: {len(impostor)}, mean={np.mean(impostor):.4f}, std={np.std(impostor):.4f}")
 
     evaluator = Evaluator(
         num_thresholds=NUM_THRESHOLDS,
         genuine_scores=genuine,
         impostor_scores=impostor,
-        plot_title="Overall Face-Mediapipe System"
+        plot_title="Face-Mediapipe-System"
     )
 
     FPR, FNR, TPR = evaluator.compute_rates()
@@ -181,7 +265,7 @@ def run_face_pipeline():
             num_thresholds=NUM_THRESHOLDS,
             genuine_scores=genuine_g,
             impostor_scores=impostor_g,
-            plot_title=f"Age Group {group_name}"
+            plot_title=f"Face_Age_{group_name}"
         )
 
         FPRg, FNRg, TPRg = eval_age.compute_rates()
@@ -190,6 +274,21 @@ def run_face_pipeline():
         eval_age.plot_roc_curve(FPRg, TPRg)
 
     print("\n========== FACE SYSTEM COMPLETE ==========\n")
+    
+    return genuine, impostor
+
+
+# Export function for main.py
+def run_face_system(directory="IMDB", num_users=200):
+    """
+    Simplified wrapper for main.py integration.
+    Returns genuine and impostor scores.
+    """
+    global DATA_DIR
+    DATA_DIR = directory
+    
+    genuine, impostor = run_face_pipeline()
+    return genuine, impostor
 
 
 if __name__ == "__main__":
